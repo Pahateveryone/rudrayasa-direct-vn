@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b141a">
+<title>Rudrayasa Direct VN</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#eef2f5;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17212b}
+main{width:min(720px,calc(100% - 24px));margin:22px auto 46px}
+.card{background:#fff;border-radius:18px;padding:20px;margin-bottom:14px;box-shadow:0 8px 28px #00000012}
+h1{font-size:24px;margin:0 0 4px}
+.sub{font-size:14px;color:#667781;margin-bottom:14px;line-height:1.45}
+.badge{display:inline-block;padding:7px 11px;border-radius:999px;font-size:13px;font-weight:750}
+.ok{background:#d9fdd3;color:#166534}.wait{background:#fff0bd;color:#745700}.bad{background:#ffe0e0;color:#991b1b}
+label{display:block;font-weight:700;margin:16px 0 7px}
+input{width:100%;padding:13px;border:1px solid #d4dce0;border-radius:11px;font-size:16px;background:#fff}
+button{width:100%;padding:13px;border:0;border-radius:11px;font-size:15px;font-weight:750;margin-top:10px;cursor:pointer}
+.primary{background:#00a884;color:#fff}.secondary{background:#e8f3f0;color:#08765f}
+button:disabled{opacity:.5;cursor:not-allowed}
+.status{background:#f5f7f8;padding:12px;border-radius:10px;margin-top:10px;white-space:pre-wrap;font-size:14px;line-height:1.45}
+.qr{text-align:center;display:none}.qr img{width:min(290px,100%)}.code{font-size:30px;letter-spacing:4px;text-align:center;font-weight:850;margin-top:10px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.small{font-size:12px;color:#667781;margin-top:8px}
+@media(max-width:520px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<section class="card">
+  <h1>Rudrayasa Direct VN</h1>
+  <div class="sub">Free Cloud • Render + MongoDB • iPhone Ready</div>
+
+  <span id="badge" class="badge wait">Starting...</span>
+  <div id="waStatus" class="status">
+    Server baru bangun. WhatsApp sedang dipersiapkan...
+  </div>
+
+  <div id="pairBox">
+    <label>Nomor WhatsApp Anda</label>
+    <input id="ownNumber" inputmode="tel" placeholder="62812xxxxxxxx">
+    <button id="pairBtn" class="secondary">DAPATKAN KODE PAIRING</button>
+    <div id="pairCode" class="code"></div>
+    <div class="small">
+      WhatsApp iPhone → Settings → Linked Devices → Link a Device →
+      Link with phone number.
+    </div>
+  </div>
+
+  <div id="qrBox" class="qr">
+    <img id="qr" alt="QR WhatsApp">
+    <div class="small">Alternatif pairing melalui QR.</div>
+  </div>
+</section>
+
+<section class="card">
+  <label>1. Pilih MP3 / Audio</label>
+  <input id="audio" type="file"
+         accept=".mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,audio/*">
+  <div id="prep" class="status">Belum ada audio.</div>
+
+  <label>2. Nomor target</label>
+  <input id="target" inputmode="tel" placeholder="628123456789">
+
+  <div class="row">
+    <button id="reset" class="secondary">PILIH ULANG</button>
+    <button id="send" class="primary" disabled>KIRIM SEBAGAI VN</button>
+  </div>
+
+  <div id="sendStatus" class="status">
+    Menunggu WhatsApp READY dan audio READY.
+  </div>
+</section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+let waReady = false;
+let currentJob = null;
+let preparing = false;
+
+function refreshButton() {
+  $('send').disabled = !(waReady && currentJob && !preparing);
+}
+
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const s = await r.json();
+
+    waReady = !!s.ready;
+
+    $('badge').textContent = waReady ? 'WhatsApp READY' : 'WhatsApp belum READY';
+    $('badge').className = 'badge ' + (waReady ? 'ok' : 'wait');
+    $('waStatus').textContent = s.status || '';
+
+    $('pairBox').style.display = waReady ? 'none' : 'block';
+
+    if (s.qrDataUrl && !waReady) {
+      $('qr').src = s.qrDataUrl;
+      $('qrBox').style.display = 'block';
+    } else {
+      $('qrBox').style.display = 'none';
+    }
+  } catch (e) {
+    waReady = false;
+    $('badge').textContent = 'Server belum siap';
+    $('badge').className = 'badge bad';
+    $('waStatus').textContent = 'Menunggu server: ' + e.message;
+  }
+
+  refreshButton();
+}
+
+setInterval(pollStatus, 1800);
+pollStatus();
+
+$('pairBtn').onclick = async () => {
+  const number = $('ownNumber').value.trim();
+  if (!number) return;
+
+  $('pairBtn').disabled = true;
+  $('pairCode').textContent = '...';
+
+  try {
+    const r = await fetch('/api/pairing-code', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({number})
+    });
+
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Pairing gagal.');
+
+    $('pairCode').textContent = d.alreadyReady ? 'READY' : d.code;
+  } catch (e) {
+    $('pairCode').textContent = 'GAGAL';
+    $('waStatus').textContent = e.message;
+  } finally {
+    $('pairBtn').disabled = false;
+  }
+};
+
+$('audio').onchange = async () => {
+  const file = $('audio').files[0];
+  if (!file) return;
+
+  if (currentJob) {
+    fetch('/api/job/' + encodeURIComponent(currentJob), {
+      method: 'DELETE'
+    }).catch(() => {});
+    currentJob = null;
+  }
+
+  preparing = true;
+  refreshButton();
+  $('prep').textContent = 'Menyiapkan voice note...';
+
+  const form = new FormData();
+  form.append('audio', file);
+
+  try {
+    const r = await fetch('/api/prepare', {
+      method: 'POST',
+      body: form
+    });
+
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Prepare gagal.');
+
+    currentJob = d.jobId;
+
+    $('prep').textContent =
+      'READY ✓\n' +
+      d.originalName + '\n' +
+      d.format + '\n' +
+      'Proses: ' + d.elapsedMs + ' ms';
+  } catch (e) {
+    currentJob = null;
+    $('prep').textContent = 'GAGAL: ' + e.message;
+  } finally {
+    preparing = false;
+    refreshButton();
+  }
+};
+
+$('reset').onclick = async () => {
+  if (currentJob) {
+    try {
+      await fetch('/api/job/' + encodeURIComponent(currentJob), {
+        method: 'DELETE'
+      });
+    } catch (_) {}
+  }
+
+  currentJob = null;
+  $('audio').value = '';
+  $('prep').textContent = 'Belum ada audio.';
+  refreshButton();
+};
+
+$('send').onclick = async () => {
+  const number = $('target').value.trim();
+  if (!number) return;
+
+  if (!confirm('Kirim voice note ke ' + number + '?')) return;
+
+  $('send').disabled = true;
+  $('sendStatus').textContent = 'Mengirim voice note...';
+
+  try {
+    const r = await fetch('/api/send', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        jobId: currentJob,
+        number
+      })
+    });
+
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Kirim gagal.');
+
+    currentJob = null;
+    $('audio').value = '';
+    $('prep').textContent = 'Belum ada audio.';
+
+    $('sendStatus').textContent =
+      'TERKIRIM ✓\nTarget: ' + d.target;
+  } catch (e) {
+    $('sendStatus').textContent = 'GAGAL: ' + e.message;
+  } finally {
+    refreshButton();
+  }
+};
+</script>
+</body>
+</html>
